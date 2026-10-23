@@ -1,0 +1,28 @@
+{
+  "baseUrl": "https://learn.tsinghua.edu.cn",
+  "cookie": "",
+  "semesterId": null,
+  "language": "zh",
+  "timezone": "Asia/Shanghai",
+  "requestIntervalMs": 1000,
+  "requestTimeoutMs": 30000,
+  "retryCount": 2,
+  "pageSize": 100,
+  "maxPages": 100,
+  "userAgent": "Mozilla/5.0 (compatible; THU-Learn-MCP/0.1; personal coursework client)",
+  "csrfToken": null,
+  "protocolFile": "protocol.json",
+  "submission": {
+    "allowedRoots": ["../submissions"],
+    "allowedExtensions": [],
+    "maxFileBytes": 52428800,
+    "maxTotalBytes": 104857600,
+    "maxFiles": 20,
+    "multiFileMode": "zip",
+    "archiveName": "homework-files.zip",
+    "allowUnknownDeadline": false,
+    "allowLateSubmission": false,
+    "verificationAttempts": 3,
+    "receiptFile": "../.state/submissions.json"
+  }
+}

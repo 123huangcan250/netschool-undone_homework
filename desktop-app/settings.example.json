@@ -1,0 +1,6 @@
+{
+  "projectDir": "E:/path/to/thu-learn-mcp-server",
+  "configPath": "E:/path/to/thu-learn-mcp-server/config/local.json",
+  "nodePath": "C:/path/to/node.exe",
+  "refreshSeconds": 3600
+}

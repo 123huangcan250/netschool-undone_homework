@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<evaluation>
+  <qa_pair><question>在固定模拟数据中，找到同时包含实验报告作业且任课教师为“模拟教师”的课程，返回其 courseId。</question><answer>course-1</answer></qa_pair>
+  <qa_pair><question>在固定模拟数据中，找到有题目附件“题目.pdf”的作业，返回其所属课程的解码后名称。</question><answer>模拟课程 &amp; 实验</answer></qa_pair>
+  <qa_pair><question>从固定模拟数据中找出实验报告作业的正常截止时间，按 UTC ISO 8601 输出，精确到秒。</question><answer>2030-11-30T15:59:59Z</answer></qa_pair>
+  <qa_pair><question>结合列表与描述，找出包含答疑时间的实验作业，返回其教师作业 ID assignmentId，不要返回学生作业 ID。</question><answer>assignment-student-hw-1</answer></qa_pair>
+  <qa_pair><question>结合固定模拟课程及作业详情，找出实验报告描述中的答疑时间，按 UTC ISO 8601 输出。</question><answer>2030-11-01T04:00:00Z</answer></qa_pair>
+  <qa_pair><question>固定模拟数据中，有题目附件的个人实验作业当前是否已提交？只回答 true 或 false。</question><answer>false</answer></qa_pair>
+  <qa_pair><question>固定模拟数据中，实验报告作业属于个人完成还是小组完成？按接口 completionType 的数字返回。</question><answer>1</answer></qa_pair>
+  <qa_pair><question>固定模拟数据中，找到对应“题目.pdf”的作业，并返回它允许上传的 ZIP 的扩展名。</question><answer>.zip</answer></qa_pair>
+  <qa_pair><question>找到固定模拟数据中由“模拟教师”任课且提交方式为网络学堂的作业，返回其学生作业 ID homeworkId。</question><answer>student-hw-1</answer></qa_pair>
+  <qa_pair><question>固定模拟数据中，结合课程、作业列表与详情，返回实验报告作业的补交截止时间，使用 UTC ISO 8601。</question><answer>2030-12-02T15:59:59Z</answer></qa_pair>
+</evaluation>

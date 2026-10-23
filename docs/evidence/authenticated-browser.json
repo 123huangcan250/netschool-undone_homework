@@ -1,0 +1,28 @@
+{
+  "observedAt": "2026-10-23T13:36:50Z",
+  "scope": "authenticated browser DOM, asset URLs, public deployment scripts",
+  "readOnly": true,
+  "loginPerformedBy": "user",
+  "semesterLabel": "2026-2027 autumn",
+  "courseCount": 11,
+  "sampleCourseRedacted": true,
+  "sampleHomeworkCounts": { "unsubmitted": 1, "submitted": 1, "graded": 3 },
+  "listEndpoints": ["zyListWj", "zyListYjwg", "zyListYpg"],
+  "detailEndpoints": { "unsubmitted": "viewZy", "submitted": "viewTj", "graded": "viewCj" },
+  "submitForm": {
+    "id": "form_sn1",
+    "method": "post",
+    "namedFields": ["xszyid", "isDeleted", "zynr", "fileupload"],
+    "remarksMaxLength": 500,
+    "fileDataLimit": "1024",
+    "normalizedMaxFileBytes": 1073741824,
+    "multiple": false,
+    "accept": null,
+    "multiFileInstruction": "compress multiple files into one file"
+  },
+  "avatarUploadControlsAlsoPresent": true,
+  "cookieTransferredToLocalConfig": false,
+  "realMcpBackendCallsTested": false,
+  "realSubmissionTested": false,
+  "secretsIncluded": false
+}

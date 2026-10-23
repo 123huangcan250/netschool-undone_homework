@@ -1,0 +1,40 @@
+{
+  "observedAt": "2026-10-23T13:46:13.435Z",
+  "transport": "stdio",
+  "readOnly": true,
+  "toolCount": 4,
+  "courseCount": 11,
+  "submissionTested": false,
+  "homeworkCount": 5,
+  "statusCounts": {
+    "unsubmitted": 1,
+    "submitted": 1,
+    "graded": 3
+  },
+  "details": [
+    {
+      "status": "unsubmitted",
+      "attachmentCount": 1,
+      "submittedAttachmentCount": 0,
+      "deadlineMatches": true,
+      "maxRemarksLength": 500,
+      "maxFileBytes": 1073741824
+    },
+    {
+      "status": "submitted",
+      "attachmentCount": 2,
+      "submittedAttachmentCount": 1,
+      "deadlineMatches": true,
+      "maxRemarksLength": null,
+      "maxFileBytes": null
+    },
+    {
+      "status": "graded",
+      "attachmentCount": 2,
+      "submittedAttachmentCount": 1,
+      "deadlineMatches": true,
+      "maxRemarksLength": null,
+      "maxFileBytes": null
+    }
+  ]
+}

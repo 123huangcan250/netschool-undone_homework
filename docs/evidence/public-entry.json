@@ -1,0 +1,30 @@
+{
+  "observedAt": "2026-10-23T11:29:58Z",
+  "method": "direct HTTP GET without personal credentials",
+  "browserAvailable": false,
+  "authenticatedObservation": false,
+  "requests": [
+    {
+      "url": "https://learn.tsinghua.edu.cn/",
+      "status": 302,
+      "location": "/f/redirectByStuOrTeacher",
+      "setCookieNames": ["JSESSIONID"]
+    },
+    {
+      "url": "https://learn.tsinghua.edu.cn/f/redirectByStuOrTeacher",
+      "status": 302,
+      "location": "/f/login",
+      "setCookieNames": ["XSRF-TOKEN"]
+    },
+    {
+      "url": "https://learn.tsinghua.edu.cn/f/login",
+      "status": 200,
+      "contentType": "text/html;charset=UTF-8",
+      "setCookieNames": ["XSRF-TOKEN", "JSESSIONID"],
+      "visibleLoginDestination": "https://id.tsinghua.edu.cn/do/off/ui/auth/login/form/bb5df85216504820be7bba2b0ae1535b/0"
+    }
+  ],
+  "sourceRepository": "https://github.com/Harry-Chen/thu-learn-lib",
+  "sourceCommit": "07fac46a3cee98fc88cb76faf4344ea67697b274",
+  "cookieValuesStored": false
+}
