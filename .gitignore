@@ -2,6 +2,7 @@ node_modules/
 dist/
 .research/
 config/local.json
+config/*.tmp
 .state/
 *.har
 *.log

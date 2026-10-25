@@ -10,6 +10,7 @@
 | `tough-cookie` | 6.0.0 | 同源会话 Cookie 与服务器轮换处理 |
 | `luxon` | 3.7.2 | 显式时区解释及严格时间解析 |
 | `fflate` | 0.8.3 | 多文件内存 ZIP 打包；上传前执行大小限制 |
+| `playwright-core` | 1.64.1 | 桌面登录使用的独立 Chrome／Edge 会话，不下载浏览器，不访问日常用户目录 |
 | `typescript` | 锁文件固定 | 严格模式编译 |
 | `tsx` | 锁文件固定 | 运行 TypeScript 测试及只读探测脚本 |
 | `@types/node`、`@types/luxon` | 锁文件固定 | 开发类型定义 |
@@ -29,6 +30,8 @@
 | `docs/VALIDATION.md` | 已验证范围和待账号验证步骤 |
 | `desktop-app/homework_app.pyw` | Windows 常开窗口、本地隐藏、正文展示、每小时调度 |
 | `desktop-app/fetch-homework.mjs` | 复用 TypeScript 服务层的只读 JSON-lines 后台读取 |
+| `desktop-app/browser-session.mjs`、`browser-login.mjs` | 手动认证窗口、会话校验和 Cookie 自动同步 |
+| `desktop-app/session-cookie.mjs`、`refresh-errors.mjs` | 轮换 Cookie 保存、域过滤及不含私密数据的错误提示 |
 | `desktop-app/install.ps1` | 创建桌面快捷方式和路径设置，不复制 Cookie |
 | `desktop-app/test_homework_app.py` | Python 标准库 unittest、真实 Tk 布局及本地状态测试 |
 

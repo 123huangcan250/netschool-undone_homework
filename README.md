@@ -2,7 +2,7 @@
 
 清华大学网络学堂未交作业管理工具：常开的 Windows 桌面“作业列表”，每小时获取本学期全部课程的未提交作业，按距离截止时间从少到多排序。同时提供基于官方 TypeScript SDK 的本地 stdio MCP 服务，可接入 Claude Code 等客户端。
 
-认证仅使用本人正常登录后手动提供的网络学堂 Cookie，不保存密码、不自动登录、不绕过身份认证。网络学堂接口属于站内接口，网站更新后可能需要调整适配。
+认证复用本人正常登录后的网络学堂 Cookie，可手动填写，也可通过独立浏览器自动同步。程序不读取或填写密码，不绕过身份认证。网络学堂接口属于站内接口，网站更新后可能需要调整适配。
 
 ## 功能
 
@@ -13,7 +13,8 @@
 | 课程和主要内容 | 显示所属课程、标题、正文摘要；选中后查看完整文字说明及题目附件名称 |
 | 小组作业本地删除 | 小组成员已代交、本人无需再交时，本地隐藏对应作业；刷新和重启后仍生效，可恢复 |
 | 常开窗口 | 首次启动立即刷新，以后每小时一次；最小化或点击右上角关闭后继续运行 |
-| 手动更新 | 提供“立即刷新”和“更新 Cookie”按钮 |
+| 登录会话维护 | 独立浏览器手动认证后自动同步 Cookie；每十分钟轻量检查，自动保存服务器轮换的新 Cookie |
+| 手动更新 | 提供“立即刷新”“浏览器登录（自动同步）”和“更新 Cookie”按钮 |
 | 异常处理 | 每个读取进程请求间隔至少一秒；读取失败最多重试两次；失败时保留旧数据并提示 |
 | MCP 工具 | 查询课程、全部作业状态、详情；明确调用提交工具时上传并提交作业 |
 
@@ -60,7 +61,11 @@ npm run build
 
 `npm ci` 按锁文件安装依赖，`npm run build` 生成 `dist`。仓库不提交 `node_modules` 和 `dist`，首次克隆后必须执行这两步。
 
-### 3. 在浏览器取得 Cookie
+### 3. 选择登录方式
+
+**推荐：浏览器登录自动同步。** 先按下一步创建完整本地配置，`cookie` 保持空字符串，安装后点击底部“浏览器登录（自动同步）”。程序使用单独的 Chrome／Edge 用户目录，你在窗口中正常完成认证后，它会验证会话、自动同步本站 Cookie 并关闭该独立窗口。不会读取日常浏览器的 Cookie 数据库或密码管理器。需要已安装 Chrome 或 Edge，无需下载额外浏览器。
+
+如果希望继续使用手动方式：
 
 1. 打开 [清华大学网络学堂](https://learn.tsinghua.edu.cn/)，正常完成统一身份认证，进入自己的课程主页。
 2. 按 **F12** 或 **Ctrl + Shift + I**，在开发者工具选择 **Network／网络**。
@@ -81,11 +86,11 @@ if (!(Test-Path -LiteralPath "config/local.json")) {
 notepad "config/local.json"
 ```
 
-只修改 `cookie` 的值，其余字段先保持默认。以下是重点字段，**不是完整配置文件**：
+选择自动同步时，`cookie` 可保持 `""`；选择手动方式时只修改它的值，其余字段先保持默认。以下是重点字段，**不是完整配置文件**：
 
 ```json
 {
-  "cookie": "在本机填写完整 Cookie 请求头值",
+  "cookie": "",
   "semesterId": null,
   "csrfToken": null,
   "timezone": "Asia/Shanghai",
@@ -111,6 +116,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\desktop-app\install.ps1 -L
 └── 作业列表程序/
     ├── homework_app.pyw        界面程序
     ├── fetch-homework.mjs      后台读取程序
+    ├── browser-login.mjs       独立登录入口
+    ├── browser-session.mjs     浏览器会话同步
+    ├── session-cookie.mjs      Cookie 过滤和保存
+    ├── refresh-errors.mjs      分类错误提示
     ├── app-settings.json       原项目、配置、Node.js 的路径
     ├── README.md
     └── data/                  运行后生成的个人缓存和偏好
@@ -159,7 +168,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\desktop-app\install.ps1 -N
 
 ### 登录过期与异常
 
-在浏览器重新登录并取得新 Cookie，点击窗口底部**“更新 Cookie”**，仅粘贴请求头的值并保存。程序更新原项目的 `config/local.json`，清空旧固定 CSRF 值并立即刷新。独立运行的 MCP 服务需要重启以读取更新后的配置。
+点击底部**“浏览器登录（自动同步）”**，在独立窗口手动完成认证，程序验证课程接口后自动同步 Cookie 并刷新作业。若现有 Cookie 仍有效，也可直接用于建立此独立会话。
+
+启用后每十分钟执行一次轻量课程接口检查，不会重新拉取全部作业，也不改变每小时作业刷新计划。服务器返回的新 Cookie 会在验证有效后保存到本地配置，避免下次仍使用旧值。失效时先尝试同步专用浏览器会话；静默恢复失败则明确提示重新登录。**后台检查只能降低空闲超时和 Cookie 轮换导致的问题，不能保证永久登录，也不能绕过学校的强制过期、设备限制或再次认证要求。**
+
+手动方式仍可用：取得新 Cookie 后点击**“更新 Cookie”**。为避免账号混用，手动更新会停用独立浏览器维护模式，再次点击“浏览器登录”可重新启用。两种方式都更新原项目的 `config/local.json` 并清空旧固定 CSRF 值。独立运行的 MCP 服务需要重启以读取更新后的配置。
 
 读取失败时保留旧列表，并提示本次尚未更新；单门课程失败会标记该课程旧数据，正文失败会保留已有正文并说明来源。不要把“读取失败”理解成“没有作业”。
 
@@ -174,6 +187,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\desktop-app\install.ps1 -N
 | 桌面程序 `data/hidden.json` | 本地删除记录，独立于服务器刷新结果 |
 | 桌面程序 `data/status.json` | 进程、刷新状态、计数、界面布局检查信息 |
 | 桌面程序 `data/instance.lock` | 单实例文件锁，进程结束后由系统释放 |
+| 桌面程序 `data/browser-profile/` | 本程序的独立浏览器用户目录，可能包含敏感登录状态，不可共享或提交 Git |
+| 桌面程序 `data/browser-session.json` | 自动同步是否启用、浏览器类型和最近同步时间；不含 Cookie 值 |
 | 项目 `.state/` | 提交回执或本地真实联调记录，不提交到 Git |
 
 桌面设置结构见 [settings.example.json](desktop-app/settings.example.json)。刷新周期默认 `3600` 秒，小于一小时的值会提升为一小时。桌面始终使用服务器当前学期，MCP 则尊重 `semesterId` 配置。
@@ -288,6 +303,6 @@ evaluations/         合成只读评估集
 submissions/         默认允许的本地提交目录，实际文件不提交 Git
 ```
 
-发布前在 Windows 本地通过 **39 项 Node.js 测试和 8 项桌面测试**。真实只读测试读取了当时本学期 11 门课程及 10 项未交作业的详情；这只是该时间点的范围，不保证覆盖每门课的特殊要求。真实提交尚未执行。历史脱敏记录见 [浏览器测试](docs/LIVE_BROWSER_TEST.md)、[MCP 测试](docs/LIVE_MCP_TEST.md) 和 [验证说明](docs/VALIDATION.md)。
+当前在 Windows 本地通过 **47 项 Node.js 测试和 10 项桌面测试**，包括 HTTP 200 登录超时识别、轮换 Cookie 保存、独立浏览器同步、私密信息不输出和十分钟调度。真实 Chrome 有效会话的可见及后台同步均已验证。早期真实只读测试读取了当时本学期 11 门课程及 10 项未交作业详情；这只是该时间点的范围，不保证覆盖每门课的特殊要求。真实提交尚未执行。历史脱敏记录见 [浏览器测试](docs/LIVE_BROWSER_TEST.md)、[MCP 测试](docs/LIVE_MCP_TEST.md) 和 [验证说明](docs/VALIDATION.md)。
 
 依赖与第三方参考见 [DEPENDENCIES.md](DEPENDENCIES.md)、[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。反馈问题时请提供已移除个人数据的错误码、复现步骤和最小样本，不要上传 Cookie、原始 HAR、个人作业附件或本地 `data` 文件夹。

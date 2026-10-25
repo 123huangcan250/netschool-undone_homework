@@ -2,6 +2,9 @@
 import { readFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { refreshErrorEvent } from './refresh-errors.mjs';
+import { browserSessionEnabled, syncBrowserSession } from './browser-session.mjs';
+import { saveCookie } from './session-cookie.mjs';
 
 const emit = value => process.stdout.write(JSON.stringify(value) + '\n');
 const optionalJson = async path => { try { return JSON.parse(await readFile(path, 'utf8')); } catch { return {}; } };
@@ -12,10 +15,30 @@ try {
   const [{ loadConfig }, { LearnService }, { asAppError }] = await Promise.all([
     import(moduleUrl('config.js')), import(moduleUrl('learn.js')), import(moduleUrl('errors.js')),
   ]);
-  const config = await loadConfig(settings.configPath);
+  let config = await loadConfig(settings.configPath);
   // The dashboard always follows the server's current semester, without editing MCP configuration.
-  const service = new LearnService({ ...config, semesterId: null });
-  const { semesterId, courses } = await service.getCourseList();
+  let service = new LearnService({ ...config, semesterId: null });
+  let inventory;
+  try { inventory = await service.getCourseList(); }
+  catch (error) {
+    if (!['AUTH_REQUIRED', 'CSRF_INVALID'].includes(error?.code) || !await browserSessionEnabled(process.argv[2])) throw error;
+    emit({ event: 'loginProgress', message: '当前 Cookie 已失效，正在尝试同步独立浏览器会话。' });
+    try { await syncBrowserSession(process.argv[2]); } catch { throw error; }
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    config = await loadConfig(settings.configPath);
+    service = new LearnService({ ...config, semesterId: null });
+    inventory = await service.getCourseList();
+  }
+  const { semesterId, courses } = inventory;
+  const persistSession = async () => {
+    try { await saveCookie(settings.configPath, await service.http.exportCookieHeader(), config.cookie); }
+    catch { emit({ event: 'sessionWarning', message: '本次读取成功，但自动保存轮换后的 Cookie 失败。' }); }
+  };
+  if (process.argv.includes('--session-only')) {
+    await persistSession();
+    emit({ event: 'session', valid: true, checkedAt: new Date().toISOString() });
+    process.exitCode = 0;
+  } else {
   emit({ event: 'courses', total: courses.length, semesterId });
   const homeworks = [], completedCourseIds = [], errors = [];
   for (const [index, course] of courses.entries()) {
@@ -52,13 +75,11 @@ try {
       }
     }
   }
+  // Don't save an anonymous replacement cookie after an authentication failure.
+  if (!detailErrors.some(e => ['AUTH_REQUIRED', 'CSRF_INVALID'].includes(e.code))) await persistSession();
   emit({ event: 'result', semesterId, courses, homeworks, completedCourseIds, errors, detailErrors, fetchedAt: new Date().toISOString() });
+  }
 } catch (error) {
-  // Never include raw exceptions, headers, request bodies, or credentials.
-  const code = ['AUTH_REQUIRED', 'CSRF_INVALID', 'NETWORK_ERROR', 'CONFIG_ERROR', 'RATE_LIMITED', 'UPSTREAM_ERROR', 'PROTOCOL_CHANGED'].includes(error?.code) ? error.code : 'CONFIG_ERROR';
-  const message = code === 'AUTH_REQUIRED' || code === 'CSRF_INVALID'
-    ? '登录已失效，请更新 Cookie 后重新刷新。'
-    : '刷新失败，请检查登录配置、网络连接及程序依赖。';
-  emit({ event: 'error', code, message });
+  emit(refreshErrorEvent(error));
   process.exitCode = 1;
 }

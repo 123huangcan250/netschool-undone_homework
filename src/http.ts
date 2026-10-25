@@ -22,6 +22,19 @@ export interface RequestOptions {
   beforeSend?: () => void;
 }
 
+/** Session expiry can be an HTTP 200 HTML dialog without a login form. */
+function isLoginPage(body: string): boolean {
+  if (/<input[^>]+type\s*=\s*["']?password|id\s*=\s*["']loginButtonId["']|login_timeout/i.test(body)) return true;
+  if (!/^\s*</.test(body) || !/<(?:html|head|title|body)(?:\s|>)/i.test(body)) return false;
+  const $ = cheerio.load(body);
+  const title = $('title').text().trim();
+  if (/^(?:登录超时|登录失效|登录过期|会话失效|会话过期|Login Timeout|Session Expired)$/i.test(title)) return true;
+  const page = $('body').clone();
+  page.find('script,style').remove();
+  const text = page.text().replace(/\s+/g, ' ').trim();
+  return /^您(?:未登录|尚未登录)(?:或登录失效)?[。！\s]*(?:(?:登录网络学堂|请重新登录|重新登录|关闭|返回首页)[。！\s]*)*$/.test(text);
+}
+
 /** One FIFO for every request, redirect, and retry in this process. */
 export class LearnHttpClient {
   private readonly jar = new CookieJar();
@@ -42,6 +55,12 @@ export class LearnHttpClient {
     for (const item of this.config.cookie.split(';')) {
       if (item.trim()) await this.jar.setCookie(`${item.trim()}; Path=/${this.config.baseUrl.startsWith('https:') ? '; Secure' : ''}`, this.config.baseUrl);
     }
+  }
+
+  /** For local persistence only. Never include this value in tool output or logs. */
+  async exportCookieHeader(): Promise<string> {
+    await this.seeded;
+    return this.jar.getCookieString(this.config.baseUrl + '/');
   }
 
   private async gated<T>(fn: () => Promise<T>): Promise<T> {
@@ -96,7 +115,8 @@ export class LearnHttpClient {
     if (value && typeof value === 'object') {
       const record = value as Record<string, unknown>;
       const message = String(record.message ?? record.msg ?? '');
-      if (/未登录|登录超时|会话失效|not.?logged|session.?expired/i.test(message)) this.authError();
+      const successful = record.result === 'success' || record.message === 'success';
+      if (!successful && /未登录|登录超时|会话失效|not.?logged|session.?expired/i.test(message)) this.authError();
     }
     return value;
   }
@@ -159,7 +179,7 @@ export class LearnHttpClient {
             }
             this.authError();
           }
-          if (/<input[^>]+type\s*=\s*["']?password|id\s*=\s*["']loginButtonId["']|login_timeout/i.test(body)) this.authError();
+          if (isLoginPage(body)) this.authError();
           if ([408, 429, 500, 502, 503, 504].includes(response.status)) {
             const retryAfter = response.headers.get('retry-after');
             const delay = retryAfter && /^\d+$/.test(retryAfter) ? Number(retryAfter) * 1000 : retryAfter ? Date.parse(retryAfter) - this.runtime.now() : 0;

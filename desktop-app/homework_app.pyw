@@ -116,8 +116,22 @@ class HomeworkApp:
         self.snapshot = {}
         self.busy = False
         self.process = None
+        self.login_process = None
+        self.login_busy = False
+        self.login_succeeded = False
+        self.checking_session = False
+        self.session_checked_at = None
+        self.session_refresh_needed = False
+        self.session_warning = ''
+        self.next_session_check = time.monotonic() + 600
+        self.auto_session_enabled = False
+        try:
+            self.auto_session_enabled = json.loads((self.data_dir / 'browser-session.json').read_text(encoding='utf-8')).get('enabled') is True
+        except (OSError, ValueError):
+            pass
         self.closing = False
         self.last_error = ''
+        self.data_state = 'cached'
         self.next_refresh = time.monotonic()
         self.last_health = 0
         self.rows = {}
@@ -234,6 +248,9 @@ class HomeworkApp:
         self.status.grid(row=7, column=0, sticky='ew', pady=(2, 6))
         footer = tk.Frame(body, bg=BG)
         footer.grid(row=8, column=0, sticky='ew')
+        self.login_button = tk.Button(footer, text='浏览器登录（自动同步）', command=self.browser_login, bg=BG, fg=ACCENT,
+                                      relief='flat', padx=0, cursor='hand2')
+        self.login_button.pack(side='left')
         tk.Button(footer, text='更新 Cookie', command=self.update_cookie, bg=BG, fg=MUTED,
                   relief='flat', padx=16, cursor='hand2').pack(side='left')
         tk.Button(footer, text='退出程序', command=self.exit, bg=BG, fg=MUTED,
@@ -279,7 +296,16 @@ class HomeworkApp:
             courses = self.snapshot.get('courses', [])
             completed = self.snapshot.get('completedCourseIds', [])
             current_hidden = len(sorted_homeworks(self.snapshot.get('homeworks', []))) - len(items)
-            self.coverage.configure(text=f"当前学期 {self.snapshot.get('semesterId', '')}  /  已核对 {len(completed)} / {len(courses)} 门课程  /  本地隐藏 {current_hidden} 项")
+            coverage = f"当前学期 {self.snapshot.get('semesterId', '')}  /  已核对 {len(completed)} / {len(courses)} 门课程  /  本地隐藏 {current_hidden} 项"
+            if self.data_state in ('cached', 'refreshing', 'failed'):
+                reason = '登录已失效，请点击“浏览器登录”' if self.last_error in ('AUTH_REQUIRED', 'CSRF_INVALID') else (
+                    '正在刷新' if self.data_state == 'refreshing' else '本次刷新未完成')
+                try:
+                    stamp = datetime.fromisoformat(self.snapshot['fetchedAt'].replace('Z', '+00:00')).astimezone(BEIJING).strftime('%m-%d %H:%M')
+                except (KeyError, ValueError, TypeError):
+                    stamp = '未知时间'
+                coverage = f'{reason}；当前显示 {stamp} 的缓存（北京时间）。  /  本地隐藏 {current_hidden} 项'
+            self.coverage.configure(text=coverage)
         self.hidden_button.configure(text=f'已删除（{len(self.hidden)}）')
         self.selection_changed()
 
@@ -393,23 +419,81 @@ class HomeworkApp:
             self.hidden_table.insert('', 'end', iid=key, values=(h.get('courseName', ''), h['title'], stamp))
 
     def refresh(self):
-        if self.busy or self.closing:
+        if self.busy or self.closing or self.login_busy:
             return
         self.busy = True
+        self.checking_session = False
+        self.session_warning = ''
+        self.next_session_check = time.monotonic() + 600
         self.last_error = ''
+        self.data_state = 'refreshing'
         self.next_refresh = time.monotonic() + self.interval
         self.refresh_button.configure(state='disabled', text='正在刷新…')
         self.progress.configure(value=0, maximum=1)
         self.status.configure(text='正在获取当前学期课程……', fg=ACCENT)
+        self.render()
         self.write_health()
         threading.Thread(target=self.fetch, daemon=True).start()
 
-    def fetch(self):
+    def check_session(self):
+        if self.busy or self.closing or self.login_busy:
+            return
+        self.busy = True
+        self.checking_session = True
+        self.session_refresh_needed = False
+        self.session_warning = ''
+        self.session_status_before = (self.status.cget('text'), self.status.cget('fg'))
+        self.next_session_check = time.monotonic() + 600
+        self.refresh_button.configure(state='disabled', text='检查登录…')
+        self.status.configure(text='正在检查并维护登录会话，作业列表仍按每小时刷新。', fg=ACCENT)
+        threading.Thread(target=self.fetch, args=(True,), daemon=True).start()
+
+    def browser_login(self):
+        if self.login_busy:
+            return
+        if self.busy:
+            messagebox.showinfo('正在读取', '请等待本次读取完成后再打开登录窗口。', parent=self.window)
+            return
+        self.login_busy = True
+        self.login_succeeded = False
+        self.login_button.configure(state='disabled')
+        self.refresh_button.configure(state='disabled')
+        self.status.configure(text='正在打开独立浏览器；请在浏览器中手动登录，程序会自动同步 Cookie。', fg=ACCENT)
+        threading.Thread(target=self.fetch_login, daemon=True).start()
+
+    def fetch_login(self):
+        proc = None
+        try:
+            proc = subprocess.Popen([self.settings['nodePath'], str(ROOT / 'browser-login.mjs'), str(self.settings_path)],
+                                    stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                    text=True, encoding='utf-8', creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0), cwd=str(ROOT))
+            self.login_process = proc
+            if self.closing:
+                proc.stdin.write('cancel\n')
+                proc.stdin.flush()
+            final_seen = False
+            for line in proc.stdout:
+                event = json.loads(line)
+                final_seen = final_seen or event.get('event') in ('loginComplete', 'error')
+                self.events.put(event)
+            proc.wait()
+            if not final_seen:
+                self.events.put({'event': 'error', 'code': 'PROCESS_ERROR', 'message': '独立登录程序未完成，请重试。'})
+        except Exception:
+            self.events.put({'event': 'error', 'code': 'PROCESS_ERROR', 'message': '无法打开独立登录程序，请检查浏览器和本地依赖。'})
+        finally:
+            self.login_process = None
+            self.events.put({'event': 'loginFinished'})
+
+    def fetch(self, session_only=False):
         timer = None
         proc = None
         timed_out = threading.Event()
         try:
-            proc = subprocess.Popen([self.settings['nodePath'], str(ROOT / 'fetch-homework.mjs'), str(self.settings_path)],
+            command = [self.settings['nodePath'], str(ROOT / 'fetch-homework.mjs'), str(self.settings_path)]
+            if session_only:
+                command.append('--session-only')
+            proc = subprocess.Popen(command,
                                     stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, encoding='utf-8',
                                     creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0), cwd=str(ROOT))
             self.process = proc
@@ -426,7 +510,7 @@ class HomeworkApp:
             final_seen = False
             for line in proc.stdout:
                 event = json.loads(line)
-                if event.get('event') in ('result', 'error'):
+                if event.get('event') in ('result', 'session', 'error'):
                     final_seen = True
                 self.events.put(event)
             proc.wait()
@@ -456,7 +540,32 @@ class HomeworkApp:
                 elif kind == 'contentProgress':
                     self.progress.configure(maximum=max(1, event['total']), value=event['done'])
                     self.status.configure(text=f"正在读取主要内容 {event['done'] + 1}/{event['total']}：{event['title']}")
+                elif kind == 'loginProgress':
+                    self.status.configure(text=event['message'], fg=ACCENT)
+                elif kind == 'loginComplete':
+                    self.login_succeeded = True
+                    self.auto_session_enabled = True
+                    self.last_error = ''
+                    self.next_session_check = time.monotonic() + 600
+                    self.status.configure(text='登录成功，Cookie 已自动同步；稍后立即刷新作业。', fg=ACCENT)
+                elif kind == 'loginFinished':
+                    self.login_busy = False
+                    self.login_button.configure(state='normal')
+                    self.refresh_button.configure(state='normal', text='立即刷新')
+                    if self.login_succeeded and not self.closing:
+                        self.window.after(1500, self.refresh)
+                elif kind == 'session':
+                    self.session_checked_at = event['checkedAt']
+                    self.session_refresh_needed = self.last_error in ('AUTH_REQUIRED', 'CSRF_INVALID')
+                    if self.session_warning:
+                        self.status.configure(text=self.session_warning, fg='#9B5B13')
+                    else:
+                        self.status.configure(text=self.session_status_before[0], fg=self.session_status_before[1])
+                elif kind == 'sessionWarning':
+                    self.session_warning = event['message']
+                    self.status.configure(text=event['message'], fg='#9B5B13')
                 elif kind == 'result':
+                    self.data_state = 'partial' if event.get('errors') else 'fresh'
                     self.snapshot = merge_snapshot(self.snapshot, event)
                     self.render()
                     self.progress.configure(maximum=1, value=1)
@@ -473,22 +582,29 @@ class HomeworkApp:
                         auth_failed = any(e['code'] in ('AUTH_REQUIRED', 'CSRF_INVALID') for e in detail_errors)
                         self.last_error = 'AUTH_REQUIRED' if auth_failed else self.last_error or 'CONTENT_PARTIAL_FAILURE'
                         message += '  ·  登录已失效，部分正文未更新，请更新 Cookie。' if auth_failed else '  ·  部分作业正文读取失败，请查看缓存或原网页。'
-                    self.status.configure(text=message, fg='#9B5B13' if errors or detail_errors else ACCENT)
+                    if self.session_warning:
+                        message += '  ·  ' + self.session_warning
+                    self.status.configure(text=message, fg='#9B5B13' if errors or detail_errors or self.session_warning else ACCENT)
                     try:
                         atomic_json(self.cache_path, self.snapshot)
                     except OSError:
                         self.status.configure(text=message + '  ·  缓存保存失败。', fg='#9B5B13')
                 elif kind == 'error':
                     self.last_error = event['code']
-                    self.status.configure(text=event['message'] + ' 上次结果保留；下次仍会自动重试。', fg='#B24736')
+                    self.data_state = 'failed'
+                    self.status.configure(text=f"【{event['code']}】{event['message']} 上次结果保留；下次仍会自动重试。", fg='#B24736')
                     if self.snapshot:
-                        self.coverage.configure(text='当前显示上次缓存结果，尚未完成本次核对。')
+                        self.render()
                     else:
                         self.coverage.configure(text='尚无可用结果，不能判断是否有未交作业。')
                 elif kind == 'finished':
+                    self.checking_session = False
                     self.busy = False
                     self.refresh_button.configure(state='normal', text='立即刷新')
                     self.write_health()
+                    if self.session_refresh_needed and not self.closing:
+                        self.session_refresh_needed = False
+                        self.window.after(1500, self.refresh)
         except queue.Empty:
             pass
         if not self.closing:
@@ -497,9 +613,12 @@ class HomeworkApp:
     def tick(self):
         now = time.monotonic()
         remaining = max(0, math.ceil(self.next_refresh - now))
-        self.countdown.configure(text='正在同步未交作业' if self.busy else f'下次刷新  {remaining // 60:02d}:{remaining % 60:02d}')
+        self.countdown.configure(text='等待浏览器登录' if self.login_busy else '正在检查登录' if self.checking_session
+                                 else '正在同步未交作业' if self.busy else f'下次刷新  {remaining // 60:02d}:{remaining % 60:02d}')
         if remaining == 0 and not self.busy:
             self.refresh()
+        if self.auto_session_enabled and now >= self.next_session_check and not self.busy and not self.login_busy:
+            self.check_session()
         # Local countdown updates never make network requests.
         wall = time.time()
         for key, h in self.rows.items():
@@ -520,9 +639,16 @@ class HomeworkApp:
                 'updatedAt': datetime.now(timezone.utc).isoformat(),
                 'fetchedAt': self.snapshot.get('fetchedAt'), 'courseCount': len(self.snapshot.get('courses', [])),
                 'pendingCount': len(self.rows), 'lastError': self.last_error,
+                'dataState': self.data_state,
+                'autoSessionEnabled': self.auto_session_enabled, 'sessionCheckedAt': self.session_checked_at,
+                'sessionIntervalSeconds': 600,
+                'nextSessionCheckInSeconds': max(0, math.ceil(self.next_session_check - time.monotonic())) if self.auto_session_enabled else None,
+                'sessionPersistenceWarning': bool(self.session_warning),
+                'loginInProgress': self.login_busy,
                 'hiddenCount': len(self.hidden),
                 'layoutVersion': 2,
                 'deleteButtonBounds': self.widget_bounds(self.delete_button),
+                'loginButtonBounds': self.widget_bounds(self.login_button),
                 'contentBounds': self.widget_bounds(self.content),
                 'contentLoadedCount': sum(bool(h.get('contentFetchedAt')) for h in self.rows.values()),
                 'sortedAscending': all(deadline_seconds(a) <= deadline_seconds(b) for a, b in zip(list(self.rows.values()), list(self.rows.values())[1:])),
@@ -546,7 +672,7 @@ class HomeworkApp:
                 webbrowser.open(url)
 
     def update_cookie(self):
-        if self.busy:
+        if self.busy or self.login_busy:
             messagebox.showinfo('正在刷新', '请等待本次刷新完成后更新 Cookie。', parent=self.window)
             return
         value = simpledialog.askstring('更新 Cookie', '粘贴网络学堂请求头中的 Cookie 值（仅保存在原本地配置文件）：',
@@ -562,6 +688,8 @@ class HomeworkApp:
             config = json.loads(path.read_text(encoding='utf-8-sig'))
             config.update(cookie=value, csrfToken=None)
             atomic_json(path, config)
+            atomic_json(self.data_dir / 'browser-session.json', {'enabled': False})
+            self.auto_session_enabled = False
         except (OSError, ValueError):
             messagebox.showerror('保存失败', '无法更新原本地配置文件，请检查路径和写入权限。', parent=self.window)
             return
@@ -575,6 +703,12 @@ class HomeworkApp:
         self.closing = True
         if self.process and self.process.poll() is None:
             self.process.kill()
+        if self.login_process and self.login_process.poll() is None:
+            try:
+                self.login_process.stdin.write('cancel\n')
+                self.login_process.stdin.flush()
+            except (OSError, ValueError):
+                pass
         self.write_health()
         self.window.destroy()
 

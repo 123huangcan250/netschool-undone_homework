@@ -82,6 +82,37 @@ test('session bootstrap extracts linked CSRF, sends headers, and accepts Set-Coo
   });
   await new LearnHttpClient(env.config, runtime).json('/b/read', { method: 'POST', replaySafe: true, body: () => new FormData() });
 });
+
+test('HTTP 200 timeout dialogs without a password input are classified as expired sessions', async t => {
+  const env = await testConfig(); t.after(env.cleanup); env.config.csrfToken = null;
+  const pages = [
+    '<!doctype html><html><head><title>登录超时</title></head><body>您未登录或登录失效<input type="button" value="登录网络学堂"><button>关闭</button></body></html>',
+    '<html><body>您未登录或登录失效 登录网络学堂 关闭</body></html>',
+  ];
+  for (const page of pages) {
+    const runtime = virtualRuntime(() => new Response(page));
+    await assert.rejects(new LearnHttpClient(env.config, runtime).json('/b/read'), { code: 'AUTH_REQUIRED' });
+    assert.equal(runtime.starts.length, 1);
+  }
+});
+
+test('homework text mentioning login timeouts is not classified as an authentication page', async t => {
+  const env = await testConfig(); t.after(env.cleanup); env.config.csrfToken = 'test';
+  const body = '<html><head><title>作业详情</title></head><body><p>解释登录超时如何处理。</p></body></html>';
+  assert.equal(await new LearnHttpClient(env.config, virtualRuntime(() => new Response(body))).text('/detail'), body);
+  const value = { result: 'success', msg: '<title>登录超时</title>' };
+  assert.deepEqual(await new LearnHttpClient(env.config, virtualRuntime(() => json(value))).json('/detail'), value);
+});
+
+test('rotated response cookies can be exported privately for persistence', async t => {
+  const env = await testConfig(); t.after(env.cleanup); env.config.csrfToken = 'test';
+  const client = new LearnHttpClient(env.config, virtualRuntime(() => new Response('ok', {
+    headers: { 'Set-Cookie': 'JSESSIONID=renewed-session; Path=/; Secure' },
+  })));
+  await client.text('/read');
+  assert.match(await client.exportCookieHeader(), /JSESSIONID=renewed-session/);
+  assert.ok(!(await client.exportCookieHeader()).includes('JSESSIONID=test-session'));
+});
 test('empty Cookie produces actionable error before network; malformed response fails closed', async t => {
   const env = await testConfig(); t.after(env.cleanup);
   env.config.cookie = '';

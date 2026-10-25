@@ -28,7 +28,7 @@ node dist/index.js --config "E:\path\to\thu-learn-mcp-server\config\local.json"
 2. 打开开发者工具 → Network，刷新主页，选择一个目标域为 **learn.tsinghua.edu.cn** 的正常课程请求。
 3. 在 Request Headers 中复制 `Cookie` 的完整值，仅复制 `name=value; name2=value2`。不要复制 `Cookie:` 前缀、响应 `Set-Cookie`、其他域 Cookie 或整个 cURL 命令。
 4. 在本地编辑 `config/local.json` 的 `cookie` 字段。`semesterId` 留为 `null` 时查询服务器当前学期，也可以填 Network 中真实出现的学期 ID。`csrfToken` 建议为 `null`，由服务使用该会话从学生主页读取。
-5. 会话过期时重新登录、更新本地配置并重启服务。服务处理运行中的同源 `Set-Cookie` 更新，但不会自动登录，也不把运行中的新 Cookie 写回磁盘。
+5. 会话过期时重新登录、更新本地配置并重启服务。独立 MCP 服务处理内存中的同源 `Set-Cookie` 轮换，不会填写密码或自动提交认证表单。桌面模式另行支持独立浏览器 Cookie 同步，并会保存验证有效的轮换 Cookie；从桌面更新后，MCP 服务需重启以读取配置。
 
 不要把 Cookie 放进聊天、Git、命令行或问题报告。`local.json`、HAR 和提交回执已加入 `.gitignore`；Windows 上本地配置的访问权限取决于目录 ACL。统一认证域的登录 Cookie 不能代替网络学堂会话 Cookie。
 

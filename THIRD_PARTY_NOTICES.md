@@ -1,6 +1,6 @@
 # 第三方参考声明
 
-网络学堂接口路径、字段语义及部分 HTML 结构参考 Harry Chen 的 [thu-learn-lib](https://github.com/Harry-Chen/thu-learn-lib)，固定提交为 `07fac46a3cee98fc88cb76faf4344ea67697b274`。本项目没有依赖或移植其自动登录实现，认证仅使用手动提供的有效会话 Cookie。
+网络学堂接口路径、字段语义及部分 HTML 结构参考 Harry Chen 的 [thu-learn-lib](https://github.com/Harry-Chen/thu-learn-lib)，固定提交为 `07fac46a3cee98fc88cb76faf4344ea67697b274`。本项目没有依赖或移植其自动登录实现，认证只复用本人正常登录后的有效会话 Cookie；桌面模式可从本程序的独立浏览器同步 Cookie。
 
 参考项目许可保留如下：
 

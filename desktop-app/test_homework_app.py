@@ -54,6 +54,13 @@ class DashboardTests(unittest.TestCase):
                     instance.restore_hidden([key])
                     self.assertIn(key, instance.rows)
                     self.assertEqual(json.loads(instance.hidden_path.read_text(encoding='utf-8')), {})
+                    instance.events.put({'event': 'error', 'code': 'AUTH_REQUIRED', 'message': '请重新登录。'})
+                    instance.poll()
+                    instance.render()
+                    self.assertIn('登录已失效', instance.coverage.cget('text'))
+                    self.assertIn('缓存', instance.coverage.cget('text'))
+                    self.assertIn('AUTH_REQUIRED', instance.status.cget('text'))
+                    self.assertIn(key, instance.rows)
                     self.assertTrue(instance.table.bind('<Delete>'))
                     instance.table.selection_set(key)
                     self.assertEqual(instance.delete_key(), 'break')
@@ -87,7 +94,7 @@ class DashboardTests(unittest.TestCase):
                             window.geometry(f'{width}x{height}')
                             window.update()
                             for label, widget in [('delete', instance.delete_button), ('restore list', instance.hidden_button),
-                                                  ('description', instance.content)]:
+                                                  ('description', instance.content), ('browser login', instance.login_button)]:
                                 bounds = instance.widget_bounds(widget)
                                 self.assertTrue(bounds['insideWindow'], f'{label} scale={scale} size={width}x{height}: {bounds}; root={window.winfo_width()}x{window.winfo_height()}')
                             self.assertLess(instance.widget_bounds(instance.delete_button)['y'], instance.widget_bounds(instance.table)['y'])
@@ -121,6 +128,7 @@ class DashboardTests(unittest.TestCase):
         # Advance a clock across two hours without real network or a one-hour sleep.
         instance = object.__new__(app.HomeworkApp)
         instance.busy, instance.closing = False, False
+        instance.login_busy, instance.checking_session, instance.auto_session_enabled = False, False, False
         instance.interval, instance.next_refresh, instance.last_health = 3600, 4600, 4600
         instance.rows = {}
         instance.window = Mock()
@@ -145,6 +153,38 @@ class DashboardTests(unittest.TestCase):
             instance.tick()
             self.assertEqual(worker.call_count, 2)
             self.assertEqual(instance.next_refresh, 11800)
+
+    def test_login_success_schedules_refresh_and_blocks_overlapping_workers(self):
+        instance = object.__new__(app.HomeworkApp)
+        instance.busy, instance.closing, instance.login_busy = False, False, False
+        instance.login_button, instance.refresh_button, instance.status = Mock(), Mock(), Mock()
+        instance.window = Mock()
+        instance.events = app.queue.Queue()
+        with patch.object(app.threading, 'Thread') as worker:
+            instance.browser_login()
+            self.assertTrue(instance.login_busy)
+            instance.refresh()
+            self.assertEqual(worker.call_count, 1)
+        instance.events.put({'event': 'loginComplete'})
+        instance.events.put({'event': 'loginFinished'})
+        instance.poll()
+        self.assertFalse(instance.login_busy)
+        self.assertTrue(instance.auto_session_enabled)
+        self.assertTrue(any(call.args == (1500, instance.refresh) for call in instance.window.after.call_args_list))
+
+    def test_ten_minute_session_check_preserves_hourly_homework_schedule(self):
+        instance = object.__new__(app.HomeworkApp)
+        instance.busy, instance.closing, instance.login_busy = False, False, False
+        instance.next_refresh = 10000
+        instance.status, instance.refresh_button = Mock(), Mock()
+        with patch.object(app.time, 'monotonic', return_value=2000), patch.object(app.threading, 'Thread') as worker:
+            instance.check_session()
+            self.assertTrue(instance.checking_session)
+            self.assertEqual(instance.next_session_check, 2600)
+            self.assertEqual(instance.next_refresh, 10000)
+            self.assertEqual(worker.call_args.kwargs['args'], (True,))
+            instance.check_session()
+            self.assertEqual(worker.call_count, 1)
 
     def test_order_dedup_unknown_and_submitted(self):
         values = [homework('unknown'), homework('later', '2030-02-01T00:00:00Z'),

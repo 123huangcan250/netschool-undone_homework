@@ -17,7 +17,7 @@ foreach ($required in @($NodePath, $PythonPath, (Join-Path $projectDir 'dist\lea
 $desktopDir = [Environment]::GetFolderPath('Desktop')
 $appDir = Join-Path $desktopDir '作业列表程序'
 New-Item -ItemType Directory -Path $appDir -Force | Out-Null
-foreach ($name in @('homework_app.pyw', 'fetch-homework.mjs', 'README.md')) {
+foreach ($name in @('homework_app.pyw', 'fetch-homework.mjs', 'refresh-errors.mjs', 'browser-login.mjs', 'browser-session.mjs', 'session-cookie.mjs', 'README.md')) {
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination (Join-Path $appDir $name) -Force
 }
 $settings = [ordered]@{
