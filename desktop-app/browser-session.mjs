@@ -1,9 +1,12 @@
-import { access, mkdir } from 'node:fs/promises';
+import { access, mkdir, rm } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
 import { cookieHeader, readJson, saveCookie, writeJsonAtomic } from './session-cookie.mjs';
+import { followSchoolLogin, readCredentials, submitStoredLogin } from './automatic-login.mjs';
+
+const exists = async path => access(path).then(() => true, () => false);
 
 /** An application-owned browser profile; never opens the user's normal profile. */
 export async function syncBrowserSession(settingsPath, { interactive = false, emit = () => {}, chromium: injectedBrowser, signal, validateSession } = {}) {
@@ -17,9 +20,12 @@ export async function syncBrowserSession(settingsPath, { interactive = false, em
   const dataDir = resolve(dirname(settingsPath), 'data');
   const statePath = resolve(dataDir, 'browser-session.json');
   const profile = resolve(dataDir, 'browser-profile');
+  const credentialsPath = resolve(dataDir, 'credentials.dpapi');
+  const attemptPath = resolve(dataDir, 'login-attempt.json');
+  const hasCredentials = !interactive && settings.pythonPath && await exists(credentialsPath);
   let state = {};
   try { state = await readJson(statePath); } catch { /* optional until enabled */ }
-  if (!interactive && !state.enabled) throw new AppError('AUTH_REQUIRED', '尚未启用独立浏览器登录。');
+  if (!interactive && !state.enabled && !hasCredentials) throw new AppError('AUTH_REQUIRED', '尚未启用独立浏览器登录。');
   await mkdir(profile, { recursive: true });
   const chromium = injectedBrowser ?? createRequire(resolve(settings.projectDir, 'package.json'))('playwright-core').chromium;
   let context;
@@ -30,7 +36,10 @@ export async function syncBrowserSession(settingsPath, { interactive = false, em
     for (const candidate of [...new Set([state.channel, settings.browserChannel, 'chrome', 'msedge'].filter(Boolean))]) {
       if (!['chrome', 'msedge'].includes(candidate)) continue;
       try {
-        context = await chromium.launchPersistentContext(profile, { channel: candidate, headless: !interactive, viewport: null, timeout: 15000 });
+        context = await chromium.launchPersistentContext(profile, {
+          channel: candidate, headless: !interactive, viewport: null, timeout: 15000,
+          ignoreDefaultArgs: ['--password-store=basic'],
+        });
         channel = candidate;
         break;
       } catch { /* try the next installed supported browser */ }
@@ -52,7 +61,10 @@ export async function syncBrowserSession(settingsPath, { interactive = false, em
     const deadline = Date.now() + (interactive ? 600000 : 10000);
     let lastFingerprint = '';
     let lastAttemptAt = 0;
-    while (Date.now() < deadline) {
+    let submitted = false;
+    let submissionDeadline = 0;
+    let openedLogin = false;
+    while (Date.now() < Math.max(deadline, submissionDeadline)) {
       if (signal?.aborted) throw new AppError('AUTH_REQUIRED', '登录操作已取消。');
       const pages = context.pages().filter(p => !p.isClosed());
       if (!pages.length) throw new AppError('AUTH_REQUIRED', '登录窗口已关闭，未保存新的会话。');
@@ -60,7 +72,7 @@ export async function syncBrowserSession(settingsPath, { interactive = false, em
       const cookies = await context.cookies(config.baseUrl);
       const cookie = cookieHeader(cookies, config.baseUrl);
       const fingerprint = createHash('sha256').update(cookie).digest('hex');
-      if (cookie && (onSchoolPage || !interactive) && (fingerprint !== lastFingerprint || Date.now() - lastAttemptAt >= 15000)) {
+      if (cookie && (onSchoolPage || (!interactive && !hasCredentials)) && (fingerprint !== lastFingerprint || Date.now() - lastAttemptAt >= 15000)) {
         lastFingerprint = fingerprint;
         lastAttemptAt = Date.now();
         try {
@@ -83,15 +95,38 @@ export async function syncBrowserSession(settingsPath, { interactive = false, em
               : { name, value: part.slice(index + 1).trim(), url: config.baseUrl, secure: true };
           }));
           await writeJsonAtomic(statePath, { enabled: true, channel, lastSyncedAt: new Date().toISOString() });
+          await rm(attemptPath, { force: true });
           return { event: 'loginComplete', saved, message: '登录会话已验证并自动同步，今后会定期维护。' };
         } catch (error) {
           if (!['AUTH_REQUIRED', 'CSRF_INVALID', 'PROTOCOL_CHANGED'].includes(error?.code)) throw error;
-          if (!interactive) throw error;
+          if (!interactive && !hasCredentials) throw error;
         }
       }
-      if (!interactive) break;
+      if (hasCredentials && !submitted) {
+        const currentUrl = new URL(page.url());
+        if (!openedLogin && currentUrl.origin === config.baseUrl) {
+          openedLogin = true;
+          if (currentUrl.pathname !== '/f/login') {
+            await page.goto(config.baseUrl + '/f/login', { waitUntil: 'domcontentloaded', timeout: 15000 });
+          }
+          await followSchoolLogin(page);
+        }
+        const candidate = pages.find(p => p.url().startsWith('https://id.tsinghua.edu.cn/'));
+        if (candidate) {
+          if (await exists(attemptPath)) throw Object.assign(new Error(), { code: 'RELOGIN_PAUSED' });
+          const outcome = await submitStoredLogin(candidate, () => readCredentials(settings.pythonPath, credentialsPath), async () => {
+            await writeJsonAtomic(attemptPath, { submittedAt: new Date().toISOString() });
+            submitted = true;
+            submissionDeadline = Date.now() + 30000;
+            emit({ event: 'loginProgress', message: '会话已失效，正在通过清华统一身份认证重新登录。' });
+          });
+          if (outcome === 'challenge') throw Object.assign(new Error(), { code: 'RELOGIN_CHALLENGE' });
+        }
+      }
+      if (!interactive && !hasCredentials) break;
       await new Promise(resolve => setTimeout(resolve, 1000));
     }
+    if (submitted) throw Object.assign(new Error(), { code: 'RELOGIN_PAUSED' });
     throw new AppError('AUTH_REQUIRED', '尚未完成有效登录，请再次点击“浏览器登录”。');
   } finally {
     signal?.removeEventListener('abort', cancel);
@@ -101,6 +136,7 @@ export async function syncBrowserSession(settingsPath, { interactive = false, em
 
 export async function browserSessionEnabled(settingsPath) {
   try {
+    if (await exists(resolve(dirname(settingsPath), 'data', 'credentials.dpapi'))) return true;
     const state = await readJson(resolve(dirname(settingsPath), 'data', 'browser-session.json'));
     await access(resolve(dirname(settingsPath), 'data', 'browser-profile'));
     return state.enabled === true;

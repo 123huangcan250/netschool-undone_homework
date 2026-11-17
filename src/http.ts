@@ -127,6 +127,14 @@ export class LearnHttpClient {
   }
 
   async text(path: string, options: RequestOptions = {}): Promise<string> {
+    return new TextDecoder().decode(await this.request(path, options, false));
+  }
+
+  async download(path: string): Promise<Uint8Array> {
+    return this.request(path, {}, true);
+  }
+
+  private async request(path: string, options: RequestOptions, binary: boolean): Promise<Uint8Array> {
     await this.seeded;
     const withCsrf = options.csrf !== false;
     if (withCsrf) await this.ensureSession();
@@ -140,7 +148,7 @@ export class LearnHttpClient {
       try {
         let target = initial;
         for (let hop = 0; hop < 6; hop++) {
-          const { response, body } = await this.gated(async () => {
+          const { response, bytes } = await this.gated(async () => {
             const headers: Record<string, string> = {
               'User-Agent': this.config.userAgent,
               Accept: 'application/json, text/html;q=0.9, */*;q=0.8',
@@ -157,9 +165,30 @@ export class LearnHttpClient {
               signal: AbortSignal.timeout(this.config.requestTimeoutMs),
             });
             for (const value of response.headers.getSetCookie()) await this.jar.setCookie(value, target.href);
-            const body = await response.text();
-            return { response, body };
+            const chunks: Uint8Array[] = [];
+            let size = 0;
+            const limit = binary ? 100 * 1024 * 1024 : 20 * 1024 * 1024;
+            if (response.body) {
+              const reader = response.body.getReader();
+              try {
+                while (true) {
+                  const { done, value } = await reader.read();
+                  if (done) break;
+                  size += value.length;
+                  if (size > limit) {
+                    await reader.cancel();
+                    throw new AppError('FILE_NOT_ALLOWED', '服务器响应超过大小限制。', false, '请在浏览器下载较大的附件。');
+                  }
+                  chunks.push(value);
+                }
+              } finally {
+                reader.releaseLock();
+              }
+            }
+            const bytes = Buffer.concat(chunks);
+            return { response, bytes };
           });
+          const body = new TextDecoder().decode(bytes.subarray(0, binary ? Math.min(bytes.length, 1024 * 1024) : bytes.length));
 
           if (response.status >= 300 && response.status < 400) {
             const location = response.headers.get('location');
@@ -179,7 +208,7 @@ export class LearnHttpClient {
             }
             this.authError();
           }
-          if (isLoginPage(body)) this.authError();
+          if ((!binary || /html|json|text/i.test(response.headers.get('content-type') ?? '') || /^\s*</.test(body)) && isLoginPage(body)) this.authError();
           if ([408, 429, 500, 502, 503, 504].includes(response.status)) {
             const retryAfter = response.headers.get('retry-after');
             const delay = retryAfter && /^\d+$/.test(retryAfter) ? Number(retryAfter) * 1000 : retryAfter ? Date.parse(retryAfter) - this.runtime.now() : 0;
@@ -187,7 +216,10 @@ export class LearnHttpClient {
             throw new AppError(response.status === 429 ? 'RATE_LIMITED' : 'UPSTREAM_ERROR', `网络学堂暂不可用（HTTP ${response.status}）。`, true, '稍后重试读取操作；提交操作先核对浏览器记录。');
           }
           if (!response.ok) throw new AppError('UPSTREAM_ERROR', `网络学堂返回 HTTP ${response.status}。`, false, '核对账号权限及接口文档。');
-          return body;
+          if (binary && /html|json/i.test(response.headers.get('content-type') ?? '')) {
+            throw protocolError('附件接口返回网页或 JSON，未保存为文件。');
+          }
+          return bytes;
         }
         throw protocolError('同源重定向次数过多。');
       } catch (error) {

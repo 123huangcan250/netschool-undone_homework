@@ -13,6 +13,7 @@ import tkinter as tk
 from tkinter import messagebox, simpledialog, ttk
 from datetime import datetime, timezone, timedelta
 import webbrowser
+from windows_credentials import save_credentials
 
 ROOT = Path(__file__).resolve().parent
 BEIJING = timezone(timedelta(hours=8))
@@ -94,6 +95,46 @@ def atomic_json(path, value):
     os.replace(temporary, path)
 
 
+class CredentialsDialog(simpledialog.Dialog):
+    def __init__(self, parent, password_saved):
+        self.password_saved = password_saved
+        super().__init__(parent, '自动登录设置')
+
+    def body(self, frame):
+        tk.Label(frame, text='保存后，会话失效时程序会使用清华统一身份认证重新登录。').grid(
+            row=0, column=0, columnspan=2, sticky='w', pady=(0, 8))
+        tk.Label(frame, text='用户名').grid(row=1, column=0, sticky='w')
+        tk.Label(frame, text='密码').grid(row=2, column=0, sticky='w')
+        self.username = ttk.Entry(frame, width=30)
+        self.password = ttk.Entry(frame, width=30, show='●')
+        self.username.grid(row=1, column=1, sticky='ew', padx=(8, 0))
+        self.password.grid(row=2, column=1, sticky='ew', padx=(8, 0))
+        return self.username
+
+    def buttonbox(self):
+        row = ttk.Frame(self)
+        ttk.Button(row, text='加密保存', command=self.ok).pack(side='left', padx=4)
+        if self.password_saved:
+            ttk.Button(row, text='清除已保存账号', command=self.remove).pack(side='left', padx=4)
+        ttk.Button(row, text='取消', command=self.cancel).pack(side='left', padx=4)
+        row.pack(pady=8)
+        self.bind('<Return>', self.ok)
+        self.bind('<Escape>', self.cancel)
+
+    def validate(self):
+        if self.username.get().strip() and self.password.get():
+            return True
+        messagebox.showwarning('请填写账号', '请输入清华统一身份认证用户名和密码。', parent=self)
+        return False
+
+    def apply(self):
+        self.result = (self.username.get().strip(), self.password.get())
+
+    def remove(self):
+        self.result = ()
+        self.cancel()
+
+
 class HomeworkApp:
     def __init__(self, window):
         self.window = window
@@ -124,11 +165,9 @@ class HomeworkApp:
         self.session_refresh_needed = False
         self.session_warning = ''
         self.next_session_check = time.monotonic() + 600
-        self.auto_session_enabled = False
-        try:
-            self.auto_session_enabled = json.loads((self.data_dir / 'browser-session.json').read_text(encoding='utf-8')).get('enabled') is True
-        except (OSError, ValueError):
-            pass
+        self.credentials_path = self.data_dir / 'credentials.dpapi'
+        self.editing_credentials = False
+        self.auto_session_enabled = self.session_maintenance_enabled()
         self.closing = False
         self.last_error = ''
         self.data_state = 'cached'
@@ -251,6 +290,8 @@ class HomeworkApp:
         self.login_button = tk.Button(footer, text='浏览器登录（自动同步）', command=self.browser_login, bg=BG, fg=ACCENT,
                                       relief='flat', padx=0, cursor='hand2')
         self.login_button.pack(side='left')
+        tk.Button(footer, text='自动登录设置', command=self.configure_credentials, bg=BG, fg=ACCENT,
+                  relief='flat', padx=16, cursor='hand2').pack(side='left')
         tk.Button(footer, text='更新 Cookie', command=self.update_cookie, bg=BG, fg=MUTED,
                   relief='flat', padx=16, cursor='hand2').pack(side='left')
         tk.Button(footer, text='退出程序', command=self.exit, bg=BG, fg=MUTED,
@@ -419,7 +460,7 @@ class HomeworkApp:
             self.hidden_table.insert('', 'end', iid=key, values=(h.get('courseName', ''), h['title'], stamp))
 
     def refresh(self):
-        if self.busy or self.closing or self.login_busy:
+        if self.busy or self.closing or self.login_busy or self.editing_credentials:
             return
         self.busy = True
         self.checking_session = False
@@ -436,7 +477,7 @@ class HomeworkApp:
         threading.Thread(target=self.fetch, daemon=True).start()
 
     def check_session(self):
-        if self.busy or self.closing or self.login_busy:
+        if self.busy or self.closing or self.login_busy or self.editing_credentials:
             return
         self.busy = True
         self.checking_session = True
@@ -495,6 +536,7 @@ class HomeworkApp:
                 command.append('--session-only')
             proc = subprocess.Popen(command,
                                     stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, encoding='utf-8',
+                                    env={key: value for key, value in os.environ.items() if key.upper() not in ('DEBUG', 'PWDEBUG', 'NODE_DEBUG')},
                                     creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0), cwd=str(ROOT))
             self.process = proc
             if self.closing:
@@ -556,7 +598,8 @@ class HomeworkApp:
                         self.window.after(1500, self.refresh)
                 elif kind == 'session':
                     self.session_checked_at = event['checkedAt']
-                    self.session_refresh_needed = self.last_error in ('AUTH_REQUIRED', 'CSRF_INVALID')
+                    self.session_refresh_needed = self.last_error in ('AUTH_REQUIRED', 'CSRF_INVALID', 'RELOGIN_PAUSED',
+                                                                      'RELOGIN_CHALLENGE', 'CREDENTIALS_UNREADABLE')
                     if self.session_warning:
                         self.status.configure(text=self.session_warning, fg='#9B5B13')
                     else:
@@ -581,7 +624,9 @@ class HomeworkApp:
                     if detail_errors:
                         auth_failed = any(e['code'] in ('AUTH_REQUIRED', 'CSRF_INVALID') for e in detail_errors)
                         self.last_error = 'AUTH_REQUIRED' if auth_failed else self.last_error or 'CONTENT_PARTIAL_FAILURE'
-                        message += '  ·  登录已失效，部分正文未更新，请更新 Cookie。' if auth_failed else '  ·  部分作业正文读取失败，请查看缓存或原网页。'
+                        message += '  ·  登录已失效，部分正文未更新。' if auth_failed else '  ·  部分作业正文读取失败，请查看缓存或原网页。'
+                        if auth_failed:
+                            self.next_session_check = time.monotonic() + 2
                     if self.session_warning:
                         message += '  ·  ' + self.session_warning
                     self.status.configure(text=message, fg='#9B5B13' if errors or detail_errors or self.session_warning else ACCENT)
@@ -593,6 +638,8 @@ class HomeworkApp:
                     self.last_error = event['code']
                     self.data_state = 'failed'
                     self.status.configure(text=f"【{event['code']}】{event['message']} 上次结果保留；下次仍会自动重试。", fg='#B24736')
+                    if event.get('interruptedRefresh'):
+                        self.next_session_check = time.monotonic() + 2
                     if self.snapshot:
                         self.render()
                     else:
@@ -671,6 +718,41 @@ class HomeworkApp:
             if url.startswith('https://learn.tsinghua.edu.cn/'):
                 webbrowser.open(url)
 
+    def session_maintenance_enabled(self):
+        if self.credentials_path.is_file():
+            return True
+        try:
+            state = json.loads((self.data_dir / 'browser-session.json').read_text(encoding='utf-8'))
+            return state.get('enabled') is True
+        except (OSError, ValueError, AttributeError):
+            return False
+
+    def configure_credentials(self):
+        if self.busy or self.login_busy or self.editing_credentials:
+            messagebox.showinfo('正在读取', '请等待本次操作完成后再修改自动登录设置。', parent=self.window)
+            return
+        self.editing_credentials = True
+        try:
+            details = CredentialsDialog(self.window, self.credentials_path.is_file()).result
+            if details is None:
+                return
+            if details:
+                save_credentials(self.credentials_path, *details)
+            else:
+                self.credentials_path.unlink(missing_ok=True)
+            self.auto_session_enabled = self.session_maintenance_enabled()
+            (self.data_dir / 'login-attempt.json').unlink(missing_ok=True)
+        except (OSError, ValueError):
+            messagebox.showerror('设置失败', '无法更新 Windows 加密凭据，请检查本地目录权限。', parent=self.window)
+            return
+        finally:
+            self.editing_credentials = False
+        if details:
+            self.refresh()
+        else:
+            self.status.configure(text='已清除自动登录账号。', fg=ACCENT)
+            self.write_health()
+
     def update_cookie(self):
         if self.busy or self.login_busy:
             messagebox.showinfo('正在刷新', '请等待本次刷新完成后更新 Cookie。', parent=self.window)
@@ -689,7 +771,7 @@ class HomeworkApp:
             config.update(cookie=value, csrfToken=None)
             atomic_json(path, config)
             atomic_json(self.data_dir / 'browser-session.json', {'enabled': False})
-            self.auto_session_enabled = False
+            self.auto_session_enabled = self.session_maintenance_enabled()
         except (OSError, ValueError):
             messagebox.showerror('保存失败', '无法更新原本地配置文件，请检查路径和写入权限。', parent=self.window)
             return

@@ -884,6 +884,134 @@
       }
     },
     {
+      "name": "download_homework_attachment",
+      "title": "下载作业附件",
+      "description": "下载作业详情 attachments 中指定序号的附件到本机绝对路径。序号从 0 开始，先调用 get_homework_detail 查看名称和角色。目标文件不得已存在，单文件上限 100 MiB。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "homeworkId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "pattern": "^[A-Za-z0-9_-]+$",
+            "description": "使用列表返回的 ID，不要使用作业标题。"
+          },
+          "attachmentIndex": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "description": "get_homework_detail 返回的 attachments 数组中的零起始序号。"
+          },
+          "destinationPath": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096,
+            "description": "服务运行电脑上的绝对文件路径，父目录需已存在。"
+          }
+        },
+        "required": [
+          "homeworkId",
+          "attachmentIndex",
+          "destinationPath"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "homeworkId": {
+                "type": "string"
+              },
+              "attachmentIndex": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "name": {
+                "type": "string"
+              },
+              "role": {
+                "type": "string",
+                "enum": [
+                  "assignment",
+                  "answer",
+                  "submitted",
+                  "feedback"
+                ]
+              },
+              "path": {
+                "type": "string"
+              },
+              "bytes": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "sha256": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "homeworkId",
+              "attachmentIndex",
+              "name",
+              "role",
+              "path",
+              "bytes",
+              "sha256"
+            ],
+            "additionalProperties": false
+          },
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "retryable": {
+                "type": "boolean"
+              },
+              "remediation": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message",
+              "retryable",
+              "remediation"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "ok"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      },
+      "execution": {
+        "taskSupport": "forbidden"
+      }
+    },
+    {
       "name": "submit_homework",
       "title": "提交作业附件",
       "description": "向指定作业上传并提交本地文件及纯文本备注，可能覆盖已有附件与正文。检查截止时间、格式和本地目录，随后核验状态、附件名和正文。filePath 与 filePaths 二选一；多文件按配置打包为一个 ZIP，课程必须接受 ZIP。不确定结果不会自动重发。仅在用户明确要求提交指定文件时调用。",

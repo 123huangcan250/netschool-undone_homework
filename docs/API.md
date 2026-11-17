@@ -2,7 +2,7 @@
 
 分析日期：2026 年 10 月 23 日。目标源地址：`https://learn.tsinghua.edu.cn`。
 
-本文覆盖本服务使用的全部接口，并区分证据来源。**浏览器只读核对及本地 stdio MCP 真实账号读取联调均已通过；真实上传与提交尚未执行。** 以下 JSON 为合成结构示例，不泄露真实账号响应；实测范围分别记录于 [LIVE_BROWSER_TEST.md](LIVE_BROWSER_TEST.md) 和 [LIVE_MCP_TEST.md](LIVE_MCP_TEST.md)。这里的接口是网络学堂内部接口，非学校发布的稳定开放 API。
+本文覆盖本服务使用的全部接口，并区分证据来源。浏览器只读核对及本地 stdio MCP 真实账号读取联调均已通过。2026 年 11 月 17 日另完成两份真实作业的上传与提交状态核验。以下 JSON 为合成结构示例，不泄露真实账号响应；早期实测范围分别记录于 [LIVE_BROWSER_TEST.md](LIVE_BROWSER_TEST.md) 和 [LIVE_MCP_TEST.md](LIVE_MCP_TEST.md)。这里的接口是网络学堂内部接口，非学校发布的稳定开放 API。
 
 ## 证据与版本
 
@@ -29,7 +29,7 @@
 | `/f/redirectByStuOrTeacher` | 302 | `/f/login` | `XSRF-TOKEN` | A |
 | `/f/login` | 200 | 登录按钮指向下述统一认证入口 | `XSRF-TOKEN`、`JSESSIONID` | A |
 
-登录页按钮指向 `https://id.tsinghua.edu.cn/do/off/ui/auth/login/form/bb5df85216504820be7bba2b0ae1535b/0`。本服务不调用身份认证表单、不处理密码或验证码。
+登录页按钮指向 `https://id.tsinghua.edu.cn/do/off/ui/auth/login/form/bb5df85216504820be7bba2b0ae1535b/0`。stdio MCP 服务使用网络学堂 Cookie。Windows 桌面程序可在独立浏览器中通过统一认证页面重新登录，验证码由用户处理。
 
 公开调用方实现显示，正常统一认证完成后可取得 roaming ticket，再通过 GET `/b/j_spring_security_thauth_roaming_entry?ticket=...` 建立网络学堂会话，随后访问学生主页读取 CSRF。该 ticket 交换属于 B 级证据，当前账号的实际跳转及 Cookie 属性尚未观测。服务不主动执行该交换，不保存 ticket，只复用用户已经建立的会话。
 
@@ -75,7 +75,7 @@ Cookie `XSRF-TOKEN` 的存在不证明其值与页面 `_csrf` 完全相同；本
 | 已批作业详情页 | GET | `/f/wlxt/kczy/zy/student/viewCj` | 无 | HTML | B、D、E |
 | 作业描述 | POST | `/b/wlxt/kczy/zy/student/detail` | FormData `id` | JSON | B、E |
 | 提交页面 | GET | `/f/wlxt/kczy/zy/student/tijiao` | 无 | HTML 表单 | B、D、E（未截止样本） |
-| 上传并提交 | POST | `/b/wlxt/kczy/zy/student/tjzy` | multipart 文件与正文 | JSON | B、D；真实写入仍未测 |
+| 上传并提交 | POST | `/b/wlxt/kczy/zy/student/tjzy` | multipart 文件与正文 | JSON | B、D；已完成真实提交核验 |
 
 ### 学生主页与 CSRF
 

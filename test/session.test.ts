@@ -7,6 +7,33 @@ import { testConfig, projectDir } from './helpers.js';
 const { cookieHeader, saveCookie, readJson } = await import(new URL('../desktop-app/session-cookie.mjs', import.meta.url).href);
 const { refreshErrorEvent } = await import(new URL('../desktop-app/refresh-errors.mjs', import.meta.url).href);
 const { syncBrowserSession, browserSessionEnabled } = await import(new URL('../desktop-app/browser-session.mjs', import.meta.url).href);
+const { submitStoredLogin } = await import(new URL('../desktop-app/automatic-login.mjs', import.meta.url).href);
+
+test('stored login only fills the official password form and yields to a visible verification prompt', async () => {
+  let url = 'https://id.tsinghua.edu.cn.example.org/do/off/ui/auth/login/form/abcd/0';
+  let challenge = false;
+  const actions: string[] = [];
+  const form = { locator: (selector: string) => ({
+    isVisible: async () => selector !== '#i_code' || challenge,
+    elementHandle: async () => ({
+      evaluate: async () => true,
+      fill: async (value: string) => { actions.push(value); },
+      click: async () => { actions.push('click'); },
+    }),
+  }) };
+  const page = { url: () => url, locator: () => form };
+  const load = async () => { actions.push('load'); return { username: 'test-user', password: 'test-password' }; };
+  const mark = async () => { actions.push('mark'); };
+  assert.equal(await submitStoredLogin(page, load, mark), 'unavailable');
+  assert.deepEqual(actions, []);
+  url = 'https://id.tsinghua.edu.cn/do/off/ui/auth/login/form/abcd/0';
+  challenge = true;
+  assert.equal(await submitStoredLogin(page, load, mark), 'challenge');
+  assert.deepEqual(actions, []);
+  challenge = false;
+  assert.equal(await submitStoredLogin(page, load, mark), 'submitted');
+  assert.deepEqual(actions, ['load', 'test-user', 'test-password', 'mark', 'click']);
+});
 
 test('browser cookie export includes only valid school/root cookies including HttpOnly', () => {
   const cookies = [

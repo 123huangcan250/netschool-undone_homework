@@ -128,6 +128,7 @@ class DashboardTests(unittest.TestCase):
         # Advance a clock across two hours without real network or a one-hour sleep.
         instance = object.__new__(app.HomeworkApp)
         instance.busy, instance.closing = False, False
+        instance.editing_credentials = False
         instance.login_busy, instance.checking_session, instance.auto_session_enabled = False, False, False
         instance.interval, instance.next_refresh, instance.last_health = 3600, 4600, 4600
         instance.rows = {}
@@ -175,6 +176,7 @@ class DashboardTests(unittest.TestCase):
     def test_ten_minute_session_check_preserves_hourly_homework_schedule(self):
         instance = object.__new__(app.HomeworkApp)
         instance.busy, instance.closing, instance.login_busy = False, False, False
+        instance.editing_credentials = False
         instance.next_refresh = 10000
         instance.status, instance.refresh_button = Mock(), Mock()
         with patch.object(app.time, 'monotonic', return_value=2000), patch.object(app.threading, 'Thread') as worker:

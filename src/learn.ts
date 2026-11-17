@@ -1,4 +1,7 @@
 import { interpolate, type LoadedConfig } from './config.js';
+import { writeFile } from 'node:fs/promises';
+import { isAbsolute } from 'node:path';
+import { createHash } from 'node:crypto';
 import { AppError, protocolError } from './errors.js';
 import { LearnHttpClient, type Runtime } from './http.js';
 import type { Course, Homework, HomeworkDetail, Status } from './models.js';
@@ -120,12 +123,33 @@ export class LearnService {
     const normalWindowOpen = detail.deadline === null || now < Date.parse(detail.deadline);
     const lateWindowOpen = detail.lateDeadline !== null && now < Date.parse(detail.lateDeadline);
     if (detail.submissionType === 2 && detail.status !== 'graded' && (normalWindowOpen || lateWindowOpen)) {
-      const form = await this.getSubmitForm(detail);
-      detail.requirements = { ...form.requirements, instructions: [detail.descriptionText, form.requirements.instructions].filter(Boolean).join('\n') };
+      try {
+        const form = await this.getSubmitForm(detail);
+        detail.requirements = { ...form.requirements, instructions: [detail.descriptionText, form.requirements.instructions].filter(Boolean).join('\n') };
+      } catch (error) {
+        if (!(error instanceof AppError) || !['PROTOCOL_CHANGED', 'UPSTREAM_ERROR'].includes(error.code)) throw error;
+        detail.warnings.push('提交表单读取失败，已返回作业正文和附件，提交限制暂时未知。');
+      }
     } else if (detail.submissionType === 2 && detail.status !== 'graded') {
       detail.warnings.push('正常提交及补交窗口已关闭，未请求提交表单；已有内容仍可读取。');
     }
     return detail;
+  }
+
+  async downloadHomeworkAttachment(homeworkId: string, attachmentIndex: number, destinationPath: string) {
+    if (!isAbsolute(destinationPath)) throw new AppError('INVALID_INPUT', '保存路径必须是绝对路径。');
+    const homework = await this.resolveHomework(homeworkId);
+    const detail = await this.readHomeworkContent(homework);
+    const attachment = detail.attachments[attachmentIndex];
+    if (!attachment) throw new AppError('NOT_FOUND', '附件序号不存在。', false, '先读取作业详情，使用 attachments 数组中的零起始序号。');
+    const bytes = await this.http.download(attachment.url);
+    try {
+      await writeFile(destinationPath, bytes, { flag: 'wx' });
+    } catch {
+      throw new AppError('FILE_NOT_ALLOWED', '无法保存附件，目标文件可能已存在或目录不可写。', false, '指定不存在的绝对文件路径，并确认父目录已存在。');
+    }
+    return { homeworkId, attachmentIndex, name: attachment.name, role: attachment.role, path: destinationPath,
+      bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') };
   }
 
   async getSubmitForm(homework: Homework): Promise<SubmitForm> {

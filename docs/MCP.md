@@ -1,8 +1,8 @@
 # 清华大学网络学堂 MCP 服务
 
-TypeScript 本地 stdio 服务，使用官方 `@modelcontextprotocol/sdk`、Node.js `fetch` 和 `cheerio`。提供课程列表、作业列表、详情和附件提交四个工具。只接收用户在浏览器正常登录后取得的网络学堂 Cookie。
+TypeScript 本地 stdio 服务，使用官方 `@modelcontextprotocol/sdk`、Node.js `fetch` 和 `cheerio`。提供课程列表、作业列表、详情、附件下载和提交五个工具，使用网络学堂 Cookie。
 
-**验证范围：代码构建、39 项 Node.js 本地测试及真实账号的 stdio MCP 只读联调已通过。** 读取了本学期 11 门课程、抽查课程全部 5 项作业，并分别验证未交、已交未批、已批各一项详情、附件和截止时间。真实上传与提交尚未执行。[接口文档](API.md)、[浏览器实测记录](LIVE_BROWSER_TEST.md) 和 [MCP 实测记录](LIVE_MCP_TEST.md) 区分各自验证范围。
+**验证范围：代码构建、48 项 Node.js 本地测试及真实账号的 stdio MCP 联调已通过。** 2026 年 11 月 17 日通过真实 MCP 会话读取课程和作业详情、下载教师附件，并完成两份作业的真实提交和状态核验。[接口文档](API.md)、[浏览器实测记录](LIVE_BROWSER_TEST.md) 和 [MCP 实测记录](LIVE_MCP_TEST.md) 记录既有验证。
 
 ## 安装与启动
 
@@ -95,9 +95,12 @@ claude mcp add --transport stdio --scope user thu-learn -- node "E:\path\to\thu-
 | `get_course_list` | 无 | 当前或配置学期、课程 ID、名称、教师 |
 | `get_homework_list` | `courseId` | 合并三个状态列表；ISO 时间、剩余秒数、状态、成绩 |
 | `get_homework_detail` | `homeworkId` | 描述、附件、提交说明、已提交内容、识别到的时间节点 |
+| `download_homework_attachment` | `homeworkId`、`attachmentIndex`、`destinationPath` | 下载详情数组中对应附件，返回路径、大小和 SHA-256 |
 | `submit_homework` | `homeworkId`、`filePath` 或 `filePaths`、可选 `remarks` | 核验结果、附件名、源文件名、SHA-256、本地回执状态 |
 
 示例 ID 是占位符，须替换为前一步工具返回的值。`homeworkId` 使用学生作业 ID `xszyid`，不是教师作业 ID `zyid`。
+
+附件序号从 0 开始，参照详情返回的 `attachments` 数组。保存路径必须是本机不存在的绝对文件路径，父目录需已存在，单个附件上限为 100 MiB。作业正文和附件均属于课程内容，下载后可使用相应格式的本地工具读取。
 
 ```json
 {"name":"get_course_list","arguments":{}}

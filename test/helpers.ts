@@ -60,6 +60,7 @@ export function mockLearn() {
       return new Response(`<div class="boxbox">assignment</div><div class="boxbox"><div class="right"></div><div class="right"></div><div class="right">${state.content}</div></div>${group('<a href="/download?fileId=teacher-file">题目.pdf</a>')}${group('')}${group(submitted)}${group('')}`);
     }
     if (url.pathname.endsWith('/detail')) return json({ result: 'success', msg: '<p>提交实验报告。答疑时间：2030-11-01 12:00</p>' });
+    if (url.pathname === '/download') return new Response(new Uint8Array([0, 1, 127, 128, 255]), { headers: { 'Content-Type': 'application/pdf' } });
     if (url.pathname.endsWith('/tijiao')) return new Response(`<form action="/b/wlxt/kczy/zy/student/tjzy" method="POST"><input type="hidden" name="_csrf" value="test-csrf"><input type="hidden" name="otherToken" value="hidden-value"><input type="file" name="fileupload" accept="${state.accept}"><textarea name="zynr"${state.remarksLimit === null ? '' : ` maxlength="${state.remarksLimit}"`}></textarea></form>`);
     if (url.pathname.endsWith('/tjzy')) {
       state.posts++;

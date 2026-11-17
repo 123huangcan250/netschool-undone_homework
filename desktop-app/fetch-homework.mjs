@@ -8,6 +8,7 @@ import { saveCookie } from './session-cookie.mjs';
 
 const emit = value => process.stdout.write(JSON.stringify(value) + '\n');
 const optionalJson = async path => { try { return JSON.parse(await readFile(path, 'utf8')); } catch { return {}; } };
+let interruptedRefresh = false;
 try {
   const settings = JSON.parse(await readFile(process.argv[2], 'utf8'));
   const hidden = await optionalJson(resolve(dirname(process.argv[2]), 'data', 'hidden.json'));
@@ -23,7 +24,11 @@ try {
   catch (error) {
     if (!['AUTH_REQUIRED', 'CSRF_INVALID'].includes(error?.code) || !await browserSessionEnabled(process.argv[2])) throw error;
     emit({ event: 'loginProgress', message: '当前 Cookie 已失效，正在尝试同步独立浏览器会话。' });
-    try { await syncBrowserSession(process.argv[2]); } catch { throw error; }
+    try { await syncBrowserSession(process.argv[2], { emit }); }
+    catch (syncError) {
+      if (['CREDENTIALS_UNREADABLE', 'RELOGIN_CHALLENGE', 'RELOGIN_PAUSED'].includes(syncError?.code)) throw syncError;
+      throw error;
+    }
     await new Promise(resolve => setTimeout(resolve, 1000));
     config = await loadConfig(settings.configPath);
     service = new LearnService({ ...config, semesterId: null });
@@ -50,7 +55,10 @@ try {
     } catch (error) {
       const safe = asAppError(error);
       errors.push({ courseId: course.courseId, courseName: course.name, code: safe.code, message: safe.message });
-      if (safe.code === 'AUTH_REQUIRED' || safe.code === 'CSRF_INVALID') throw safe;
+      if (safe.code === 'AUTH_REQUIRED' || safe.code === 'CSRF_INVALID') {
+        interruptedRefresh = true;
+        throw safe;
+      }
     }
   }
   // Fetch content only after all course inventories are complete. Hidden items remain in
@@ -80,6 +88,6 @@ try {
   emit({ event: 'result', semesterId, courses, homeworks, completedCourseIds, errors, detailErrors, fetchedAt: new Date().toISOString() });
   }
 } catch (error) {
-  emit(refreshErrorEvent(error));
+  emit({ ...refreshErrorEvent(error), interruptedRefresh });
   process.exitCode = 1;
 }
